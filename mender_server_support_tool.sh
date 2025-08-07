@@ -404,6 +404,18 @@ collect_pod_logs() {
     "app.kubernetes.io/component=useradm"
     "app.kubernetes.io/component=tenantadm"
     "app.kubernetes.io/component=deployments"
+    "app.kubernetes.io/component=auditlogs"
+    "app.kubernetes.io/component=api-gateway"
+    "app.kubernetes.io/component=create-artifact-worker"
+    "app.kubernetes.io/component=device-auth"
+    "app.kubernetes.io/component=deviceconfig"
+    "app.kubernetes.io/component=deviceconnect"
+    "app.kubernetes.io/component=devicemonitor"
+    "app.kubernetes.io/component=gui"
+    "app.kubernetes.io/component=inventory"
+    "app.kubernetes.io/component=iot-manager"
+    "app.kubernetes.io/component=workflows-server"
+    "app.kubernetes.io/component=workflows-worker"
   )
 
   local found_any=false
