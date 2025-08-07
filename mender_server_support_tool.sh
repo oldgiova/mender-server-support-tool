@@ -267,12 +267,58 @@ mask_secrets() {
     -e 's/(authorization["\s]*:["\s]*)[^"\s,}]+/\1***********/gi' \
     -e 's/(bearer["\s]*:["\s]*)[^"\s,}]+/\1***********/gi' \
     -e 's/(jwt["\s]*:["\s]*)[^"\s,}]+/\1***********/gi' \
+    -e 's/(AWS_ACCESS_KEY_ID["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(AWS_SECRET_ACCESS_KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(AWS_SESSION_TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(AWS_SECURITY_TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(AZURE_[A-Z_]*SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(AZURE_[A-Z_]*KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(AZURE_[A-Z_]*TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(AZURE_CLIENT_SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(GCP_[A-Z_]*KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(GOOGLE_[A-Z_]*KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(GCLOUD_[A-Z_]*KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(GITHUB_TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(GITLAB_TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(DOCKER_[A-Z_]*TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(DOCKER_PASSWORD["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(NPM_TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(DATABASE_URL["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(MONGODB_URI["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(POSTGRES_PASSWORD["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(MYSQL_[A-Z_]*PASSWORD["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(REDIS_PASSWORD["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(RABBITMQ_PASSWORD["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(ELASTIC[A-Z_]*PASSWORD["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(STRIPE_[A-Z_]*KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(SLACK_[A-Z_]*TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(SENDGRID_API_KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(MAILGUN_API_KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(TWILIO_[A-Z_]*TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(SSH_[A-Z_]*KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(RSA_[A-Z_]*KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(OIDC_[A-Z_]*SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(OAUTH_[A-Z_]*SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(JWT_SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(SESSION_SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(ENCRYPTION_KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(SIGNING_KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(CLIENT_SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(CONSUMER_SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(AKID[A-Z0-9]{16})/***AWS_ACCESS_KEY***/g' \
+    -e 's/(AKIA[A-Z0-9]{16})/***AWS_ACCESS_KEY***/g' \
+    -e 's/(ASIA[A-Z0-9]{16})/***AWS_TEMP_KEY***/g' \
+    -e 's/([a-zA-Z0-9/+=]{40})/***POSSIBLE_AWS_SECRET***/g' \
     -e 's/([a-zA-Z0-9+\/]{40,}=*)/***BASE64_CONTENT***/g' \
     -e 's/(-----BEGIN[^-]+-----)[^-]+(-----END[^-]+-----)/\1***CERTIFICATE_CONTENT***\2/g' \
     -e 's/(Bearer\s+)[^\s]+/\1***********/gi' \
-    -e 's/(aws_access\s+)[^\s]+/\1***********/gi' \
-    -e 's/(aws_secret\s+)[^\s]+/\1***********/gi' \
-    -e 's/(Basic\s+)[^\s]+/\1***********/gi'
+    -e 's/(Basic\s+)[^\s]+/\1***********/gi' \
+    -e 's/(ghp_[a-zA-Z0-9]{36})/***GITHUB_TOKEN***/g' \
+    -e 's/(ghs_[a-zA-Z0-9]{36})/***GITHUB_TOKEN***/g' \
+    -e 's/(glpat-[a-zA-Z0-9\-_]{20,})/***GITLAB_TOKEN***/g' \
+    -e 's/(sk_live_[a-zA-Z0-9]{24,})/***STRIPE_LIVE_KEY***/g' \
+    -e 's/(sk_test_[a-zA-Z0-9]{24,})/***STRIPE_TEST_KEY***/g' \
+    -e 's/(xox[baprs]-[a-zA-Z0-9\-]+)/***SLACK_TOKEN***/g'
 }
 
 # Function to collect helm values
