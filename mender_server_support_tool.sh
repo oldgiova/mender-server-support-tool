@@ -268,7 +268,7 @@ mask_secrets() {
     -e 's/(bearer["\s]*:["\s]*)[^"\s,}]+/\1***********/gi' \
     -e 's/(jwt["\s]*:["\s]*)[^"\s,}]+/\1***********/gi' \
     -e 's/(AWS_ACCESS_KEY_ID["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
-    -e 's/(AWS_SECRET_ACCESS_KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
+    -e 's/(AWS_SECRET_ACCESS_KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1********************/g' \
     -e 's/(AWS_SESSION_TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
     -e 's/(AWS_SECURITY_TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
     -e 's/(AZURE_[A-Z_]*SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1***********/g' \
@@ -416,6 +416,7 @@ collect_pod_logs() {
     "app.kubernetes.io/component=iot-manager"
     "app.kubernetes.io/component=workflows-server"
     "app.kubernetes.io/component=workflows-worker"
+    "app.kubernetes.io/component=generate-delta-worker"
   )
 
   local found_any=false
@@ -690,25 +691,25 @@ EOF
 # Function to show security warning
 show_security_warning() {
   print_msg "$YELLOW" "╔══════════════════════════════════════════════════════════════╗"
-  print_msg "$YELLOW" "║                    SECURITY NOTICE                          ║"
+  print_msg "$YELLOW" "║                    SECURITY NOTICE                           ║"
   print_msg "$YELLOW" "╠══════════════════════════════════════════════════════════════╣"
-  print_msg "$YELLOW" "║ This script collects potentially sensitive information.     ║"
+  print_msg "$YELLOW" "║ This script collects potentially sensitive information.      ║"
   print_msg "$YELLOW" "║                                                              ║"
-  print_msg "$YELLOW" "║ The support bundle may contain:                             ║"
-  print_msg "$YELLOW" "║ - Configuration values (secrets are masked by default)      ║"
-  print_msg "$YELLOW" "║ - Pod logs (may contain sensitive application data)         ║"
-  print_msg "$YELLOW" "║ - Cluster information                                       ║"
+  print_msg "$YELLOW" "║ The support bundle may contain:                              ║"
+  print_msg "$YELLOW" "║ - Configuration values (secrets are masked by default)       ║"
+  print_msg "$YELLOW" "║ - Pod logs (may contain sensitive application data)          ║"
+  print_msg "$YELLOW" "║ - Cluster information                                        ║"
   print_msg "$YELLOW" "║                                                              ║"
-  print_msg "$YELLOW" "║ Security measures in place:                                 ║"
-  print_msg "$YELLOW" "║ - Temporary files created with mode 700                     ║"
-  print_msg "$YELLOW" "║ - Output files created with mode 600                        ║"
-  print_msg "$YELLOW" "║ - Secrets masked in values and logs (if enabled)            ║"
-  print_msg "$YELLOW" "║ - Secure deletion of temp files on exit                     ║"
+  print_msg "$YELLOW" "║ Security measures in place:                                  ║"
+  print_msg "$YELLOW" "║ - Temporary files created with mode 700                      ║"
+  print_msg "$YELLOW" "║ - Output files created with mode 600                         ║"
+  print_msg "$YELLOW" "║ - Secrets masked in values and logs (if enabled)             ║"
+  print_msg "$YELLOW" "║ - Secure deletion of temp files on exit                      ║"
   print_msg "$YELLOW" "║                                                              ║"
-  print_msg "$YELLOW" "║ Recommendations:                                            ║"
-  print_msg "$YELLOW" "║ - Review the bundle contents before sharing                 ║"
-  print_msg "$YELLOW" "║ - Transfer using encrypted channels only                    ║"
-  print_msg "$YELLOW" "║ - Delete with: shred -vfz support_*.tar.gz                  ║"
+  print_msg "$YELLOW" "║ Recommendations:                                             ║"
+  print_msg "$YELLOW" "║ - Review the bundle contents before sharing                  ║"
+  print_msg "$YELLOW" "║ - Transfer using encrypted channels only                     ║"
+  print_msg "$YELLOW" "║ - Delete with: shred -vfz support_*.tar.gz                   ║"
   print_msg "$YELLOW" "╚══════════════════════════════════════════════════════════════╝"
   echo ""
 
