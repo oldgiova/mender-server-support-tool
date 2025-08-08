@@ -443,14 +443,14 @@ collect_pod_logs() {
           } >"$log_file"
 
           # Get the logs (last 1000 lines by default, adjust as needed)
-          if kubectl logs "$pod" -n "$NAMESPACE" --tail=1000 | grep -v 'health\|alive' >>"$log_file" 2>&1; then
+          if kubectl logs "$pod" -n "$NAMESPACE" | grep -v 'health\|alive\|status' | tail -n1000 >>"$log_file" 2>&1; then
             print_msg "$GREEN" "    ✓ Logs saved for $pod"
           else
             # Try to get logs from previous container if current one failed
             echo "" >>"$log_file"
             echo "Note: Current container logs not available, trying previous container..." >>"$log_file"
             echo "----------------------------------------" >>"$log_file"
-            if kubectl logs "$pod" -n "$NAMESPACE" --previous --tail=1000 | grep -v 'health\|alive' >>"$log_file" 2>&1; then
+            if kubectl logs "$pod" -n "$NAMESPACE" --previous | grep -v 'health\|alive\|status' | tail -n1000 >>"$log_file" 2>&1; then
               print_msg "$YELLOW" "    ⚠ Got previous container logs for $pod"
             else
               print_msg "$YELLOW" "    ⚠ Could not retrieve logs for $pod"
