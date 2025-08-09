@@ -661,6 +661,7 @@ Contents:
   * deployments pods (app.kubernetes.io/component=deployments)
 - configmaps.yaml: All ConfigMaps in the namespace with their content (secrets masked: $MASK_SECRETS)
 - secrets_list.txt: List of all Secrets in the namespace (METADATA ONLY - no secret values)
+- list_tenants.txt: List of all tenants in Mender (secrets masked: $MASK_SECRETS)
 - README.txt: This file
 
 Security Notes:
@@ -688,7 +689,28 @@ EOF
   print_msg "$YELLOW" "⚠ Security: Bundle contains potentially sensitive data. Handle with care!"
 }
 
-# Function to show security warning
+list_tenants() {
+  local output_file="$TMP_DIR/list_tenants.txt"
+  print_msg "$YELLOW" "Collecting tenant information..."
+
+  {
+    echo "tenantadm list-tenants"
+    echo "Namespace: $NAMESPACE"
+    echo "Timestamp: $(date)"
+    echo "----------------------------------------"
+  } >"$output_file"
+
+  if kubectl get deploy mender-tenantadm -n "$NAMESPACE" 2>&1; then
+    local tenantadm="kubectl exec -n "$NAMESPACE" deploy/mender-tenantadm -- tenantadm"
+    $tenantadm list-tenants | jq . | mask_secrets >>"$output_file" || true
+    chmod 600 "$output_file"
+    print_msg "$GREEN" "✓ tenantadm list-tenants information saved to $(basename "$output_file")"
+  else
+    chmod 600 "$output_file"
+    print_msg "$YELLOW" "⚠ Error collecting tenantadm list-tenants information, see $(basename "$output_file") for details"
+  fi
+}
+
 show_security_warning() {
   print_msg "$YELLOW" "╔══════════════════════════════════════════════════════════════╗"
   print_msg "$YELLOW" "║                    SECURITY NOTICE                           ║"
@@ -750,6 +772,7 @@ main() {
   collect_pod_logs
   collect_configmaps
   collect_secrets_list
+  list_tenants
 
   # Create support bundle
   echo ""
