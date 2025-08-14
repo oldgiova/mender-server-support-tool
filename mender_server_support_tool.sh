@@ -662,6 +662,12 @@ Contents:
 - configmaps.yaml: All ConfigMaps in the namespace with their content (secrets masked: $MASK_SECRETS)
 - secrets_list.txt: List of all Secrets in the namespace (METADATA ONLY - no secret values)
 - list_tenants.txt: List of all tenants in Mender (secrets masked: $MASK_SECRETS)
+- mongo_deployment_service.txt: dump of the deployment_service-* databases
+- mongo_deviceauth.txt: dump of the deviceauth database
+- mongo_inventory.txt: dump of the inventory-* databases
+- mongo_tenantadm.txt: dump of the tenantadm database
+- mongo_useradm.txt: dump of the useradm database
+- mongo_workflows.txt
 - README.txt: This file
 
 Security Notes:
@@ -708,6 +714,246 @@ list_tenants() {
   else
     chmod 600 "$output_file"
     print_msg "$YELLOW" "⚠ Error collecting tenantadm list-tenants information, see $(basename "$output_file") for details"
+  fi
+}
+
+mongo_dump_useradm() {
+  local output_file="$TMP_DIR/mongo_useradm.txt"
+  print_msg "$YELLOW" "Collecting mongo useradm information..."
+
+  {
+    echo "mongosh use useradm"
+    echo "Namespace: $NAMESPACE"
+    echo "Timestamp: $(date)"
+    echo "----------------------------------------"
+  } >"$output_file"
+
+  if
+    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) --eval 'use useradm;'"
+    kubectl delete pod mongosh >/dev/null 2>&1
+    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
+  then
+    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) <<EOF
+use useradm;
+db.migration_info.find();
+db.users.find();
+quit;
+EOF
+    " | mask_secrets >>"$output_file" || true
+    kubectl delete pod mongosh >/dev/null 2>&1
+    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
+    chmod 600 "$output_file"
+    print_msg "$GREEN" "✓ mongosh useradm information saved to $(basename "$output_file")"
+  else
+    chmod 600 "$output_file"
+    print_msg "$YELLOW" "⚠ Error collecting mongosh useradm information, see $(basename "$output_file") for details"
+  fi
+}
+
+mongo_dump_deployment_service() {
+  local output_file="$TMP_DIR/mongo_deployment_service.txt"
+  print_msg "$YELLOW" "Collecting mongo deployment service information..."
+
+  {
+    echo "mongosh use deployment_service-*"
+    echo "Namespace: $NAMESPACE"
+    echo "Timestamp: $(date)"
+    echo "----------------------------------------"
+  } >"$output_file"
+
+  if
+    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) --eval 'use deployment_service;'"
+    kubectl delete pod mongosh >/dev/null 2>&1
+    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
+  then
+    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) <<EOF
+var dbs = db.getSiblingDB('admin').runCommand({ 'listDatabases': 1 }).databases;
+
+dbs.forEach(function(database) {
+  if (database.name.startsWith('deployment_service-')) {
+    print('-----------------------------------------');
+    print('Processing database: ' + database.name);
+    print('-----------------------------------------');
+
+    var currentDb = db.getSiblingDB(database.name);
+    var collections = currentDb.getCollectionNames();
+
+    collections.forEach(function(collectionName) {
+      print('Collection: ' + collectionName);
+      currentDb[collectionName].find().forEach(function(doc) {
+        printjson(doc);
+      });
+    });
+  }
+});
+quit;
+EOF
+    " | mask_secrets >>"$output_file" || true
+    kubectl delete pod mongosh >/dev/null 2>&1
+    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
+    chmod 600 "$output_file"
+    print_msg "$GREEN" "✓ mongosh deployment service information saved to $(basename "$output_file")"
+  else
+    chmod 600 "$output_file"
+    print_msg "$YELLOW" "⚠ Error collecting mongosh deployment service information, see $(basename "$output_file") for details"
+  fi
+}
+
+mongo_dump_deviceauth() {
+  local output_file="$TMP_DIR/mongo_deviceauth.txt"
+  print_msg "$YELLOW" "Collecting mongo deviceauth service information..."
+
+  {
+    echo "mongosh use deviceauth"
+    echo "Namespace: $NAMESPACE"
+    echo "Timestamp: $(date)"
+    echo "----------------------------------------"
+  } >"$output_file"
+
+  if
+    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) --eval 'use deviceauth;'"
+    kubectl delete pod mongosh >/dev/null 2>&1
+    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
+  then
+    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) <<EOF
+use deviceauth;
+var collections = db.getCollectionNames();
+collections.forEach(function(collectionName) {
+  print('Collection: ' + collectionName);
+  db[collectionName].find().forEach(function(doc) {
+    printjson(doc);
+  });
+});
+quit;
+EOF
+    " | mask_secrets >>"$output_file" || true
+    kubectl delete pod mongosh >/dev/null 2>&1
+    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
+    chmod 600 "$output_file"
+    print_msg "$GREEN" "✓ mongosh deviceauth information saved to $(basename "$output_file")"
+  else
+    chmod 600 "$output_file"
+    print_msg "$YELLOW" "⚠ Error collecting mongosh deviceauth information, see $(basename "$output_file") for details"
+  fi
+}
+
+mongo_dump_inventory() {
+  local output_file="$TMP_DIR/mongo_inventory.txt"
+  print_msg "$YELLOW" "Collecting mongo inventory information..."
+
+  {
+    echo "mongosh use inventory"
+    echo "Namespace: $NAMESPACE"
+    echo "Timestamp: $(date)"
+    echo "----------------------------------------"
+  } >"$output_file"
+
+  if
+    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) --eval 'use inventory;'"
+    kubectl delete pod mongosh >/dev/null 2>&1
+    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
+  then
+    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) <<EOF
+var dbs = db.getSiblingDB('admin').runCommand({ 'listDatabases': 1 }).databases;
+
+dbs.forEach(function(database) {
+  if (database.name.startsWith('inventory-')) {
+    print('-----------------------------------------');
+    print('Processing database: ' + database.name);
+    print('-----------------------------------------');
+
+    var currentDb = db.getSiblingDB(database.name);
+    var collections = currentDb.getCollectionNames();
+
+    collections.forEach(function(collectionName) {
+      print('Collection: ' + collectionName);
+      currentDb[collectionName].find().forEach(function(doc) {
+        printjson(doc);
+      });
+    });
+  }
+});
+quit;
+EOF
+    " | mask_secrets >>"$output_file" || true
+    kubectl delete pod mongosh >/dev/null 2>&1
+    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
+    chmod 600 "$output_file"
+    print_msg "$GREEN" "✓ mongosh inventory information saved to $(basename "$output_file")"
+  else
+    chmod 600 "$output_file"
+    print_msg "$YELLOW" "⚠ Error collecting mongosh inventory information, see $(basename "$output_file") for details"
+  fi
+}
+
+mongo_dump_tenantadm() {
+  local output_file="$TMP_DIR/mongo_tenantadm.txt"
+  print_msg "$YELLOW" "Collecting mongo tenantadm service information..."
+
+  {
+    echo "mongosh use tenantadm"
+    echo "Namespace: $NAMESPACE"
+    echo "Timestamp: $(date)"
+    echo "----------------------------------------"
+  } >"$output_file"
+
+  if
+    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) --eval 'use tenantadm;'"
+    kubectl delete pod mongosh >/dev/null 2>&1
+    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
+  then
+    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) <<EOF
+use tenantadm;
+var collections = db.getCollectionNames();
+collections.forEach(function(collectionName) {
+  print('Collection: ' + collectionName);
+  db[collectionName].find().forEach(function(doc) {
+    printjson(doc);
+  });
+});
+quit;
+EOF
+    " | mask_secrets >>"$output_file" || true
+    kubectl delete pod mongosh >/dev/null 2>&1
+    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
+    chmod 600 "$output_file"
+    print_msg "$GREEN" "✓ mongosh tenantadm information saved to $(basename "$output_file")"
+  else
+    chmod 600 "$output_file"
+    print_msg "$YELLOW" "⚠ Error collecting mongosh tenantadm information, see $(basename "$output_file") for details"
+  fi
+}
+
+mongo_dump_workflows() {
+  local output_file="$TMP_DIR/mongo_workflows.txt"
+  print_msg "$YELLOW" "Collecting mongo workflows service information..."
+
+  {
+    echo "mongosh use workflows"
+    echo "Namespace: $NAMESPACE"
+    echo "Timestamp: $(date)"
+    echo "----------------------------------------"
+  } >"$output_file"
+
+  if
+    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) --eval 'use workflows;'"
+    kubectl delete pod mongosh >/dev/null 2>&1
+    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
+  then
+    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) <<EOF
+use workflows;
+db.migration_info.find();
+db.jobs.find();
+quit;
+EOF
+    " | mask_secrets >>"$output_file" || true
+    kubectl delete pod mongosh >/dev/null 2>&1
+    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
+    chmod 600 "$output_file"
+    print_msg "$GREEN" "✓ mongosh workflows information saved to $(basename "$output_file")"
+  else
+    chmod 600 "$output_file"
+    print_msg "$YELLOW" "⚠ Error collecting mongosh workflows information, see $(basename "$output_file") for details"
   fi
 }
 
@@ -773,6 +1019,12 @@ main() {
   collect_configmaps
   collect_secrets_list
   list_tenants
+  mongo_dump_useradm
+  mongo_dump_deployment_service
+  mongo_dump_deviceauth
+  mongo_dump_inventory
+  mongo_dump_tenantadm
+  mongo_dump_workflows
 
   # Create support bundle
   echo ""
