@@ -7,9 +7,11 @@ TMP_DIR=""
 NAMESPACE=""
 HELM_RELEASE=""
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-SUPPORT_BUNDLE="mender_support_${TIMESTAMP}.tar.gz"
+RAND_SUFFIX=$(od -An -N3 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')
+SUPPORT_BUNDLE="mender_support_${TIMESTAMP}_${RAND_SUFFIX}.tar.gz"
 MASK_SECRETS="${MASK_SECRETS:-true}" # Can be disabled with MASK_SECRETS=false
 MAX_LOG_LINES="${MAX_LOG_LINES:-1000}"
+MONGO_IMAGE="${MONGO_IMAGE:-mongo:8.0}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -25,8 +27,11 @@ cleanup() {
   local exit_code=$?
   echo -e "\n${YELLOW}Cleaning up...${NC}"
   if [[ -n "$TMP_DIR" ]] && [[ -d "$TMP_DIR" ]]; then
-    # Securely remove temporary directory
-    find "$TMP_DIR" -type f -exec shred -vfz {} \; 2>/dev/null || true
+    if command -v shred >/dev/null 2>&1; then
+      find "$TMP_DIR" -type f -exec shred -fz {} \; 2>/dev/null || true
+    else
+      print_msg "$YELLOW" "Warning: 'shred' not available - temp files removed with rm only (not cryptographically wiped)"
+    fi
     rm -rf "$TMP_DIR"
     echo -e "${GREEN}Temporary directory cleaned up${NC}"
   fi
@@ -85,6 +90,15 @@ check_requirements() {
     print_msg "$RED" "Please install missing tools before running this script"
     exit 1
   fi
+
+  # Verify kubectl cluster connectivity before proceeding
+  print_msg "$YELLOW" "Verifying cluster connectivity..."
+  if ! kubectl cluster-info >/dev/null 2>&1; then
+    print_msg "$RED" "Error: Cannot connect to Kubernetes cluster."
+    print_msg "$RED" "Check your kubeconfig and cluster availability."
+    exit 1
+  fi
+  print_msg "$GREEN" "✓ Cluster connectivity verified"
 
   echo ""
 }
@@ -244,81 +258,85 @@ collect_helm_list() {
   fi
 }
 
-# Enhanced function to mask secrets in values
+# Function to mask secrets in output.
+# NOTE: ["\s] inside sed [] is broken - always use ["[:space:]] for clarity.
+# NOTE: [^\s] inside sed [] is broken - always use [^[:space:]] for clarity.
 mask_secrets() {
   if [[ "$MASK_SECRETS" != "true" ]]; then
     cat
     return
   fi
 
-  # More comprehensive secret masking
   sed -E \
-    -e 's/(password[s]?["\s]*:["\s]*)[^"\s,}]+/\1****************************************/gi' \
-    -e 's/(passwd["\s]*:["\s]*)[^"\s,}]+/\1****************************************/gi' \
-    -e 's/(pwd["\s]*:["\s]*)[^"\s,}]+/\1****************************************/gi' \
-    -e 's/(secret[s]?["\s]*:["\s]*)[^"\s,}]+/\1****************************************/gi' \
-    -e 's/(token[s]?["\s]*:["\s]*)[^"\s,}]+/\1****************************************/gi' \
-    -e 's/(api[_-]?key[s]?["\s]*:["\s]*)[^"\s,}]+/\1****************************************/gi' \
-    -e 's/(api[_-]?secret[s]?["\s]*:["\s]*)[^"\s,}]+/\1****************************************/gi' \
-    -e 's/(access[_-]?key[s]?["\s]*:["\s]*)[^"\s,}]+/\1****************************************/gi' \
-    -e 's/(private[_-]?key[s]?["\s]*:["\s]*)[^"\s,}]+/\1****************************************/gi' \
-    -e 's/(credential[s]?["\s]*:["\s]*)[^"\s,}]+/\1****************************************/gi' \
-    -e 's/(auth["\s]*:["\s]*)[^"\s,}]+/\1****************************************/gi' \
-    -e 's/(authorization["\s]*:["\s]*)[^"\s,}]+/\1****************************************/gi' \
-    -e 's/(bearer["\s]*:["\s]*)[^"\s,}]+/\1****************************************/gi' \
-    -e 's/(jwt["\s]*:["\s]*)[^"\s,}]+/\1****************************************/gi' \
-    -e 's/(AWS_ACCESS_KEY_ID["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(AWS_SECRET_ACCESS_KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1******************************************************************************/g' \
-    -e 's/(AWS_SESSION_TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(AWS_SECURITY_TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(AZURE_[A-Z_]*SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(AZURE_[A-Z_]*KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(AZURE_[A-Z_]*TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(AZURE_CLIENT_SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(GCP_[A-Z_]*KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(GOOGLE_[A-Z_]*KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(GCLOUD_[A-Z_]*KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(GITHUB_TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(GITLAB_TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(DOCKER_[A-Z_]*TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(DOCKER_PASSWORD["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(NPM_TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(DATABASE_URL["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(MONGODB_URI["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(POSTGRES_PASSWORD["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(MYSQL_[A-Z_]*PASSWORD["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(REDIS_PASSWORD["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(RABBITMQ_PASSWORD["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(ELASTIC[A-Z_]*PASSWORD["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(STRIPE_[A-Z_]*KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(SLACK_[A-Z_]*TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(SENDGRID_API_KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(MAILGUN_API_KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(TWILIO_[A-Z_]*TOKEN["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(SSH_[A-Z_]*KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(RSA_[A-Z_]*KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(OIDC_[A-Z_]*SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(OAUTH_[A-Z_]*SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(JWT_SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(SESSION_SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(ENCRYPTION_KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(SIGNING_KEY["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(CLIENT_SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
-    -e 's/(CONSUMER_SECRET["\s]*[=:]["\s]*)[^"\s,}]+/\1****************************************/g' \
+    -e 's/(password[s]?["[:space:]]*:["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/gi' \
+    -e 's/(passwd["[:space:]]*:["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/gi' \
+    -e 's/(pwd["[:space:]]*:["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/gi' \
+    -e 's/(secret[s]?["[:space:]]*:["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/gi' \
+    -e 's/(token[s]?["[:space:]]*:["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/gi' \
+    -e 's/(api[-_]?key[s]?["[:space:]]*:["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/gi' \
+    -e 's/(api[-_]?secret[s]?["[:space:]]*:["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/gi' \
+    -e 's/(access[-_]?key[s]?["[:space:]]*:["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/gi' \
+    -e 's/(private[-_]?key[s]?["[:space:]]*:["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/gi' \
+    -e 's/(credential[s]?["[:space:]]*:["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/gi' \
+    -e 's/(auth["[:space:]]*:["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/gi' \
+    -e 's/(authorization["[:space:]]*:["[:space:]]*)[^"\n]+/\1***MASKED***/gi' \
+    -e 's/(bearer["[:space:]]*:["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/gi' \
+    -e 's/(jwt["[:space:]]*:["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/gi' \
+    -e 's/(AWS_ACCESS_KEY_ID["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(AWS_SECRET_ACCESS_KEY["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(AWS_SESSION_TOKEN["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(AWS_SECURITY_TOKEN["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(AZURE_[A-Z_]*SECRET["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(AZURE_[A-Z_]*KEY["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(AZURE_[A-Z_]*TOKEN["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(AZURE_CLIENT_SECRET["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(GCP_[A-Z_]*KEY["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(GOOGLE_[A-Z_]*KEY["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(GCLOUD_[A-Z_]*KEY["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(GITHUB_TOKEN["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(GITLAB_TOKEN["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(DOCKER_[A-Z_]*TOKEN["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(DOCKER_PASSWORD["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(NPM_TOKEN["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(DATABASE_URL["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(MONGODB_URI["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(MONGO_URL["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(MONGO_CONN_STR["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(POSTGRES_PASSWORD["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(MYSQL_[A-Z_]*PASSWORD["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(REDIS_PASSWORD["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(RABBITMQ_PASSWORD["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(ELASTIC[A-Z_]*PASSWORD["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(STRIPE_[A-Z_]*KEY["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(SLACK_[A-Z_]*TOKEN["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(SENDGRID_API_KEY["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(MAILGUN_API_KEY["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(TWILIO_[A-Z_]*TOKEN["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(SSH_[A-Z_]*KEY["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(RSA_[A-Z_]*KEY["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(OIDC_[A-Z_]*SECRET["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(OAUTH_[A-Z_]*SECRET["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(JWT_SECRET["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(SESSION_SECRET["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(ENCRYPTION_KEY["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(SIGNING_KEY["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(CLIENT_SECRET["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(CONSUMER_SECRET["[:space:]]*[=:]["[:space:]]*)[^"[:space:],}]+/\1***MASKED***/g' \
+    -e 's/(password|passwd|secret|token|credential|api[-_]?key|private[-_]?key|auth)[a-zA-Z_0-9-]*[[:space:]]*=[[:space:]]*[^"[:space:],}]+/\1=***MASKED***/gi' \
     -e 's/(AKID[A-Z0-9]{16})/***AWS_ACCESS_KEY***/g' \
     -e 's/(AKIA[A-Z0-9]{16})/***AWS_ACCESS_KEY***/g' \
     -e 's/(ASIA[A-Z0-9]{16})/***AWS_TEMP_KEY***/g' \
-    -e 's/([a-zA-Z0-9/+=]{40})/***POSSIBLE_AWS_SECRET***/g' \
-    -e 's/([a-zA-Z0-9+\/]{40,}=*)/***BASE64_CONTENT***/g' \
+    -e 's/mongodb(\+srv)?:\/\/[^[:space:]"]+/***MONGODB_URL***/g' \
+    -e 's/eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]*/***JWT_TOKEN***/g' \
     -e 's/(-----BEGIN[^-]+-----)[^-]+(-----END[^-]+-----)/\1***CERTIFICATE_CONTENT***\2/g' \
-    -e 's/(Bearer\s+)[^\s]+/\1****************************************/gi' \
-    -e 's/(Basic\s+)[^\s]+/\1****************************************/gi' \
+    -e 's/(Bearer[[:space:]]+)[^[:space:]]+/\1***MASKED***/gi' \
+    -e 's/(Basic[[:space:]]+)[^[:space:]]+/\1***MASKED***/gi' \
     -e 's/(ghp_[a-zA-Z0-9]{36})/***GITHUB_TOKEN***/g' \
     -e 's/(ghs_[a-zA-Z0-9]{36})/***GITHUB_TOKEN***/g' \
-    -e 's/(glpat-[a-zA-Z0-9\-_]{20,})/***GITLAB_TOKEN***/g' \
+    -e 's/(glpat-[a-zA-Z0-9_-]{20,})/***GITLAB_TOKEN***/g' \
     -e 's/(sk_live_[a-zA-Z0-9]{24,})/***STRIPE_LIVE_KEY***/g' \
     -e 's/(sk_test_[a-zA-Z0-9]{24,})/***STRIPE_TEST_KEY***/g' \
-    -e 's/(xox[baprs]-[a-zA-Z0-9\-]+)/***SLACK_TOKEN***/g'
+    -e 's/(xox[baprs]-[a-zA-Z0-9-]+)/***SLACK_TOKEN***/g'
 }
 
 # Function to collect helm values
@@ -333,7 +351,7 @@ collect_helm_values() {
       echo "# Helm Values for release: $HELM_RELEASE"
       echo "# Namespace: $NAMESPACE"
       echo "# Timestamp: $(date)"
-      echo "# Note: Sensitive values have been masked with ****************************************"
+      echo "# Note: Sensitive values have been masked with ***MASKED***"
       echo "# ----------------------------------------"
       echo "$values_output" | mask_secrets
     } >"$output_file"
@@ -395,7 +413,7 @@ collect_pods() {
 # Function to collect logs from pods with specific labels
 collect_pod_logs() {
   local logs_dir="$TMP_DIR/pod_logs"
-  mkdir -p "$logs_dir"
+  mkdir -p "$logs_dir" && chmod 700 "$logs_dir"
 
   print_msg "$YELLOW" "Collecting pod logs for specific components..."
 
@@ -442,15 +460,14 @@ collect_pod_logs() {
             echo "----------------------------------------"
           } >"$log_file"
 
-          # Get the logs (last 1000 lines by default, adjust as needed)
-          if kubectl logs "$pod" -n "$NAMESPACE" | grep -v 'health\|alive\|status' | tail -n1000 >>"$log_file" 2>&1; then
+          # Get the logs (last 1000 lines), filter noise, mask secrets
+          if kubectl logs "$pod" -n "$NAMESPACE" 2>&1 | grep -viE 'health|alive|status' | tail -n"${MAX_LOG_LINES}" | mask_secrets >>"$log_file"; then
             print_msg "$GREEN" "    ✓ Logs saved for $pod"
           else
-            # Try to get logs from previous container if current one failed
             echo "" >>"$log_file"
             echo "Note: Current container logs not available, trying previous container..." >>"$log_file"
             echo "----------------------------------------" >>"$log_file"
-            if kubectl logs "$pod" -n "$NAMESPACE" --previous | grep -v 'health\|alive\|status' | tail -n1000 >>"$log_file" 2>&1; then
+            if kubectl logs "$pod" -n "$NAMESPACE" --previous 2>&1 | grep -viE 'health|alive|status' | tail -n"${MAX_LOG_LINES}" | mask_secrets >>"$log_file"; then
               print_msg "$YELLOW" "    ⚠ Got previous container logs for $pod"
             else
               print_msg "$YELLOW" "    ⚠ Could not retrieve logs for $pod"
@@ -483,7 +500,7 @@ collect_configmaps() {
   {
     echo "# ConfigMaps in namespace: $NAMESPACE"
     echo "# Timestamp: $(date)"
-    echo "# Note: ConfigMap contents may contain sensitive data"
+    echo "# Note: ConfigMap contents may contain sensitive data - secrets are masked"
     echo "# ============================================"
     echo ""
   } >"$output_file"
@@ -549,7 +566,7 @@ collect_secrets_list() {
 
   # Get secrets with details but without actual secret data
   if kubectl get secrets -n "$NAMESPACE" -o json 2>/dev/null |
-    jq -r '.items[] | 
+    jq -r '.items[] |
             "\(.metadata.name)|\(.type)|
             \(.data | if . then (. | keys | length) else 0 end)|
             \(.metadata.creationTimestamp)"' |
@@ -641,6 +658,14 @@ collect_secrets_list() {
 create_support_bundle() {
   print_msg "$YELLOW" "Creating support bundle..."
 
+  # Collect cluster context for audit trail
+  local cluster_server
+  cluster_server=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo "unknown")
+  local kube_user
+  kube_user=$(kubectl config view --minify -o jsonpath='{.users[0].name}' 2>/dev/null || echo "unknown")
+  local kube_context
+  kube_context=$(kubectl config current-context 2>/dev/null || echo "unknown")
+
   # Add a README file to the bundle
   cat >"$TMP_DIR/README.txt" <<EOF
 Mender Server Support Bundle
@@ -649,6 +674,12 @@ Generated: $(date)
 Namespace: $NAMESPACE
 Helm Release: $HELM_RELEASE
 Secrets Masked: $MASK_SECRETS
+
+Audit:
+- Cluster: $cluster_server
+- Context: $kube_context
+- Kubeconfig User: $kube_user
+- System User: $(id -un 2>/dev/null || echo "unknown")
 
 Contents:
 - helm_history.txt: History of the Helm release
@@ -671,13 +702,14 @@ Contents:
 - README.txt: This file
 
 Security Notes:
-- All sensitive information has been masked with **************************************** if MASK_SECRETS=true
+- All sensitive information has been masked with ***MASKED*** if MASK_SECRETS=true
 - ConfigMap contents are included but may contain configuration data
 - Secret VALUES are NOT included - only metadata (name, type, age, data count)
 - Pod logs contain the last $MAX_LOG_LINES lines from each pod
 - This bundle may still contain sensitive information - handle with care
 - Recommended: Transfer using encrypted channels only
 - Recommended: Delete after use with secure deletion (shred -vfz)
+- Note: shred effectiveness depends on storage type; not guaranteed on SSDs
 
 File Permissions:
 - All files created with mode 600 (owner read/write only)
@@ -706,15 +738,76 @@ list_tenants() {
     echo "----------------------------------------"
   } >"$output_file"
 
-  if kubectl get deploy mender-tenantadm -n "$NAMESPACE" 2>&1; then
-    local tenantadm="kubectl exec -n "$NAMESPACE" deploy/mender-tenantadm -- tenantadm"
-    $tenantadm list-tenants | jq . | mask_secrets >>"$output_file" || true
+  if kubectl get deploy mender-tenantadm -n "$NAMESPACE" >/dev/null 2>&1; then
+    # Use array to avoid word-splitting and quoting bugs with string-based command vars
+    local -a tenantadm=(kubectl exec -n "$NAMESPACE" deploy/mender-tenantadm -- tenantadm)
+    "${tenantadm[@]}" list-tenants | jq . | mask_secrets >>"$output_file" || true
     chmod 600 "$output_file"
     print_msg "$GREEN" "✓ tenantadm list-tenants information saved to $(basename "$output_file")"
   else
     chmod 600 "$output_file"
     print_msg "$YELLOW" "⚠ Error collecting tenantadm list-tenants information, see $(basename "$output_file") for details"
   fi
+}
+
+# Helper: run a mongosh script in a disposable debug pod.
+# Credentials are injected via envFrom from the existing mongodb-common k8s secret.
+# The MongoDB URL is NEVER passed as a command-line argument (not visible in ps aux).
+# The JS script is base64-encoded and decoded inside the container to avoid quoting issues.
+_run_mongosh_pod() {
+  local pod_name="$1"
+  local js_script="$2"
+  local output_file="$3"
+
+  # Verify the secret exists before attempting to spin up a pod
+  if ! kubectl get secret mongodb-common -n "$NAMESPACE" >/dev/null 2>&1; then
+    print_msg "$YELLOW" "  Secret 'mongodb-common' not found in namespace '$NAMESPACE' - skipping"
+    return 1
+  fi
+
+  # Base64-encode the JS script - safe to embed in a single-quoted shell argument
+  # (base64 output only contains A-Za-z0-9+/= and we strip newlines)
+  local script_b64
+  script_b64=$(printf '%s' "$js_script" | base64 | tr -d '\n')
+
+  # Build bash command for inside the container.
+  # $MONGO_URL is expanded by bash INSIDE the container from the envFrom-injected env var.
+  # It is NOT expanded on the local machine (note the escaped \$MONGO_URL).
+  local bash_cmd="echo '${script_b64}' | base64 -d | mongosh \"\$MONGO_URL\" --quiet"
+
+  # Build the pod override JSON using jq for correct escaping.
+  # envFrom injects MONGO_URL from the existing mongodb-common secret -
+  # the credential value never appears in the command line or in ps output.
+  local overrides
+  overrides=$(jq -n \
+    --arg pod_name "$pod_name" \
+    --arg bash_cmd "$bash_cmd" \
+    --arg image "$MONGO_IMAGE" \
+    '{
+      spec: {
+        containers: [{
+          name: $pod_name,
+          image: $image,
+          command: ["bash", "-c", $bash_cmd],
+          envFrom: [{secretRef: {name: "mongodb-common"}}]
+        }]
+      }
+    }')
+
+  kubectl run "$pod_name" \
+    -n "$NAMESPACE" \
+    --image="${MONGO_IMAGE}" \
+    --restart=Never \
+    --overrides="$overrides" \
+    --attach=true 2>&1 | mask_secrets >>"$output_file" || true
+
+  kubectl delete pod "$pod_name" -n "$NAMESPACE" >/dev/null 2>&1 || true
+  kubectl wait --for=delete pod "$pod_name" -n "$NAMESPACE" --timeout=30s >/dev/null 2>&1 || true
+}
+
+# Generate a unique pod name suffix to prevent collisions on concurrent runs
+_mongosh_pod_name() {
+  echo "mongosh-$(od -An -N4 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')"
 }
 
 mongo_dump_useradm() {
@@ -728,26 +821,18 @@ mongo_dump_useradm() {
     echo "----------------------------------------"
   } >"$output_file"
 
-  if
-    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) --eval 'use useradm;'"
-    kubectl delete pod mongosh >/dev/null 2>&1
-    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
-  then
-    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) <<EOF
+  local js_script
+  js_script=$(cat <<'JSEOF'
 use useradm;
 db.migration_info.find();
 db.users.find();
 quit;
-EOF
-    " | mask_secrets >>"$output_file" || true
-    kubectl delete pod mongosh >/dev/null 2>&1
-    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
-    chmod 600 "$output_file"
-    print_msg "$GREEN" "✓ mongosh useradm information saved to $(basename "$output_file")"
-  else
-    chmod 600 "$output_file"
-    print_msg "$YELLOW" "⚠ Error collecting mongosh useradm information, see $(basename "$output_file") for details"
-  fi
+JSEOF
+)
+
+  _run_mongosh_pod "$(_mongosh_pod_name)" "$js_script" "$output_file"
+  chmod 600 "$output_file"
+  print_msg "$GREEN" "✓ mongosh useradm information saved to $(basename "$output_file")"
 }
 
 mongo_dump_deployment_service() {
@@ -761,12 +846,8 @@ mongo_dump_deployment_service() {
     echo "----------------------------------------"
   } >"$output_file"
 
-  if
-    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) --eval 'use deployment_service;'"
-    kubectl delete pod mongosh >/dev/null 2>&1
-    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
-  then
-    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) <<EOF
+  local js_script
+  js_script=$(cat <<'JSEOF'
 var dbs = db.getSiblingDB('admin').runCommand({ 'listDatabases': 1 }).databases;
 
 dbs.forEach(function(database) {
@@ -787,16 +868,12 @@ dbs.forEach(function(database) {
   }
 });
 quit;
-EOF
-    " | mask_secrets >>"$output_file" || true
-    kubectl delete pod mongosh >/dev/null 2>&1
-    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
-    chmod 600 "$output_file"
-    print_msg "$GREEN" "✓ mongosh deployment service information saved to $(basename "$output_file")"
-  else
-    chmod 600 "$output_file"
-    print_msg "$YELLOW" "⚠ Error collecting mongosh deployment service information, see $(basename "$output_file") for details"
-  fi
+JSEOF
+)
+
+  _run_mongosh_pod "$(_mongosh_pod_name)" "$js_script" "$output_file"
+  chmod 600 "$output_file"
+  print_msg "$GREEN" "✓ mongosh deployment service information saved to $(basename "$output_file")"
 }
 
 mongo_dump_deviceauth() {
@@ -810,12 +887,8 @@ mongo_dump_deviceauth() {
     echo "----------------------------------------"
   } >"$output_file"
 
-  if
-    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) --eval 'use deviceauth;'"
-    kubectl delete pod mongosh >/dev/null 2>&1
-    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
-  then
-    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) <<EOF
+  local js_script
+  js_script=$(cat <<'JSEOF'
 use deviceauth;
 var collections = db.getCollectionNames();
 collections.forEach(function(collectionName) {
@@ -825,16 +898,12 @@ collections.forEach(function(collectionName) {
   });
 });
 quit;
-EOF
-    " | mask_secrets >>"$output_file" || true
-    kubectl delete pod mongosh >/dev/null 2>&1
-    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
-    chmod 600 "$output_file"
-    print_msg "$GREEN" "✓ mongosh deviceauth information saved to $(basename "$output_file")"
-  else
-    chmod 600 "$output_file"
-    print_msg "$YELLOW" "⚠ Error collecting mongosh deviceauth information, see $(basename "$output_file") for details"
-  fi
+JSEOF
+)
+
+  _run_mongosh_pod "$(_mongosh_pod_name)" "$js_script" "$output_file"
+  chmod 600 "$output_file"
+  print_msg "$GREEN" "✓ mongosh deviceauth information saved to $(basename "$output_file")"
 }
 
 mongo_dump_inventory() {
@@ -848,12 +917,8 @@ mongo_dump_inventory() {
     echo "----------------------------------------"
   } >"$output_file"
 
-  if
-    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) --eval 'use inventory;'"
-    kubectl delete pod mongosh >/dev/null 2>&1
-    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
-  then
-    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) <<EOF
+  local js_script
+  js_script=$(cat <<'JSEOF'
 var dbs = db.getSiblingDB('admin').runCommand({ 'listDatabases': 1 }).databases;
 
 dbs.forEach(function(database) {
@@ -874,16 +939,12 @@ dbs.forEach(function(database) {
   }
 });
 quit;
-EOF
-    " | mask_secrets >>"$output_file" || true
-    kubectl delete pod mongosh >/dev/null 2>&1
-    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
-    chmod 600 "$output_file"
-    print_msg "$GREEN" "✓ mongosh inventory information saved to $(basename "$output_file")"
-  else
-    chmod 600 "$output_file"
-    print_msg "$YELLOW" "⚠ Error collecting mongosh inventory information, see $(basename "$output_file") for details"
-  fi
+JSEOF
+)
+
+  _run_mongosh_pod "$(_mongosh_pod_name)" "$js_script" "$output_file"
+  chmod 600 "$output_file"
+  print_msg "$GREEN" "✓ mongosh inventory information saved to $(basename "$output_file")"
 }
 
 mongo_dump_tenantadm() {
@@ -897,12 +958,8 @@ mongo_dump_tenantadm() {
     echo "----------------------------------------"
   } >"$output_file"
 
-  if
-    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) --eval 'use tenantadm;'"
-    kubectl delete pod mongosh >/dev/null 2>&1
-    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
-  then
-    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) <<EOF
+  local js_script
+  js_script=$(cat <<'JSEOF'
 use tenantadm;
 var collections = db.getCollectionNames();
 collections.forEach(function(collectionName) {
@@ -912,16 +969,12 @@ collections.forEach(function(collectionName) {
   });
 });
 quit;
-EOF
-    " | mask_secrets >>"$output_file" || true
-    kubectl delete pod mongosh >/dev/null 2>&1
-    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
-    chmod 600 "$output_file"
-    print_msg "$GREEN" "✓ mongosh tenantadm information saved to $(basename "$output_file")"
-  else
-    chmod 600 "$output_file"
-    print_msg "$YELLOW" "⚠ Error collecting mongosh tenantadm information, see $(basename "$output_file") for details"
-  fi
+JSEOF
+)
+
+  _run_mongosh_pod "$(_mongosh_pod_name)" "$js_script" "$output_file"
+  chmod 600 "$output_file"
+  print_msg "$GREEN" "✓ mongosh tenantadm information saved to $(basename "$output_file")"
 }
 
 mongo_dump_workflows() {
@@ -935,26 +988,18 @@ mongo_dump_workflows() {
     echo "----------------------------------------"
   } >"$output_file"
 
-  if
-    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) --eval 'use workflows;'"
-    kubectl delete pod mongosh >/dev/null 2>&1
-    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
-  then
-    kubectl run -it mongosh --image=mongo:8.0 --restart=Never -- bash -c "mongosh $(kubectl get secret mongodb-common -n $NAMESPACE -o jsonpath='{.data.MONGO_URL}' | base64 -d) <<EOF
+  local js_script
+  js_script=$(cat <<'JSEOF'
 use workflows;
 db.migration_info.find();
 db.jobs.find();
 quit;
-EOF
-    " | mask_secrets >>"$output_file" || true
-    kubectl delete pod mongosh >/dev/null 2>&1
-    kubectl wait --for=delete pod mongosh >/dev/null 2>&1
-    chmod 600 "$output_file"
-    print_msg "$GREEN" "✓ mongosh workflows information saved to $(basename "$output_file")"
-  else
-    chmod 600 "$output_file"
-    print_msg "$YELLOW" "⚠ Error collecting mongosh workflows information, see $(basename "$output_file") for details"
-  fi
+JSEOF
+)
+
+  _run_mongosh_pod "$(_mongosh_pod_name)" "$js_script" "$output_file"
+  chmod 600 "$output_file"
+  print_msg "$GREEN" "✓ mongosh workflows information saved to $(basename "$output_file")"
 }
 
 show_security_warning() {
@@ -973,11 +1018,13 @@ show_security_warning() {
   print_msg "$YELLOW" "║ - Output files created with mode 600                         ║"
   print_msg "$YELLOW" "║ - Secrets masked in values and logs (if enabled)             ║"
   print_msg "$YELLOW" "║ - Secure deletion of temp files on exit                      ║"
+  print_msg "$YELLOW" "║ - MongoDB credentials never passed as command-line args      ║"
   print_msg "$YELLOW" "║                                                              ║"
   print_msg "$YELLOW" "║ Recommendations:                                             ║"
   print_msg "$YELLOW" "║ - Review the bundle contents before sharing                  ║"
   print_msg "$YELLOW" "║ - Transfer using encrypted channels only                     ║"
   print_msg "$YELLOW" "║ - Delete with: shred -vfz support_*.tar.gz                   ║"
+  print_msg "$YELLOW" "║   (shred may not be effective on SSDs/copy-on-write FS)      ║"
   print_msg "$YELLOW" "╚══════════════════════════════════════════════════════════════╝"
   echo ""
 
