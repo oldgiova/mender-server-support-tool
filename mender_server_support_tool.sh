@@ -812,10 +812,10 @@ _mongosh_pod_name() {
 
 mongo_dump_useradm() {
   local output_file="$TMP_DIR/mongo_useradm.txt"
-  print_msg "$YELLOW" "Collecting mongo useradm information..."
+  print_msg "$YELLOW" "Collecting mongo useradm information (useradm + useradm-*)..."
 
   {
-    echo "mongosh use useradm"
+    echo "mongosh use useradm / useradm-*"
     echo "Namespace: $NAMESPACE"
     echo "Timestamp: $(date)"
     echo "----------------------------------------"
@@ -823,9 +823,32 @@ mongo_dump_useradm() {
 
   local js_script
   js_script=$(cat <<'JSEOF'
-use useradm;
-db.migration_info.find();
-db.users.find();
+var allDbs = db.getSiblingDB('admin').runCommand({ 'listDatabases': 1 }).databases;
+var dbNames = allDbs.map(function(d) { return d.name; });
+
+if (dbNames.indexOf('useradm') !== -1) {
+  print('-----------------------------------------');
+  print('Processing database: useradm');
+  print('-----------------------------------------');
+  var useradmDb = db.getSiblingDB('useradm');
+  useradmDb.getCollectionNames().forEach(function(collectionName) {
+    print('Collection: ' + collectionName);
+    useradmDb[collectionName].find().forEach(function(doc) { printjson(doc); });
+  });
+}
+
+allDbs.forEach(function(database) {
+  if (database.name.startsWith('useradm-')) {
+    print('-----------------------------------------');
+    print('Processing database: ' + database.name);
+    print('-----------------------------------------');
+    var currentDb = db.getSiblingDB(database.name);
+    currentDb.getCollectionNames().forEach(function(collectionName) {
+      print('Collection: ' + collectionName);
+      currentDb[collectionName].find().forEach(function(doc) { printjson(doc); });
+    });
+  }
+});
 quit;
 JSEOF
 )
@@ -878,10 +901,10 @@ JSEOF
 
 mongo_dump_deviceauth() {
   local output_file="$TMP_DIR/mongo_deviceauth.txt"
-  print_msg "$YELLOW" "Collecting mongo deviceauth service information..."
+  print_msg "$YELLOW" "Collecting mongo deviceauth service information (deviceauth + deviceauth-*)..."
 
   {
-    echo "mongosh use deviceauth"
+    echo "mongosh use deviceauth / deviceauth-*"
     echo "Namespace: $NAMESPACE"
     echo "Timestamp: $(date)"
     echo "----------------------------------------"
@@ -889,13 +912,31 @@ mongo_dump_deviceauth() {
 
   local js_script
   js_script=$(cat <<'JSEOF'
-use deviceauth;
-var collections = db.getCollectionNames();
-collections.forEach(function(collectionName) {
-  print('Collection: ' + collectionName);
-  db[collectionName].find().forEach(function(doc) {
-    printjson(doc);
+var allDbs = db.getSiblingDB('admin').runCommand({ 'listDatabases': 1 }).databases;
+var dbNames = allDbs.map(function(d) { return d.name; });
+
+if (dbNames.indexOf('deviceauth') !== -1) {
+  print('-----------------------------------------');
+  print('Processing database: deviceauth');
+  print('-----------------------------------------');
+  var deviceauthDb = db.getSiblingDB('deviceauth');
+  deviceauthDb.getCollectionNames().forEach(function(collectionName) {
+    print('Collection: ' + collectionName);
+    deviceauthDb[collectionName].find().forEach(function(doc) { printjson(doc); });
   });
+}
+
+allDbs.forEach(function(database) {
+  if (database.name.startsWith('deviceauth-')) {
+    print('-----------------------------------------');
+    print('Processing database: ' + database.name);
+    print('-----------------------------------------');
+    var currentDb = db.getSiblingDB(database.name);
+    currentDb.getCollectionNames().forEach(function(collectionName) {
+      print('Collection: ' + collectionName);
+      currentDb[collectionName].find().forEach(function(doc) { printjson(doc); });
+    });
+  }
 });
 quit;
 JSEOF
@@ -908,10 +949,10 @@ JSEOF
 
 mongo_dump_inventory() {
   local output_file="$TMP_DIR/mongo_inventory.txt"
-  print_msg "$YELLOW" "Collecting mongo inventory information..."
+  print_msg "$YELLOW" "Collecting mongo inventory information (inventory + inventory-*)..."
 
   {
-    echo "mongosh use inventory"
+    echo "mongosh use inventory / inventory-*"
     echo "Namespace: $NAMESPACE"
     echo "Timestamp: $(date)"
     echo "----------------------------------------"
@@ -919,22 +960,29 @@ mongo_dump_inventory() {
 
   local js_script
   js_script=$(cat <<'JSEOF'
-var dbs = db.getSiblingDB('admin').runCommand({ 'listDatabases': 1 }).databases;
+var allDbs = db.getSiblingDB('admin').runCommand({ 'listDatabases': 1 }).databases;
+var dbNames = allDbs.map(function(d) { return d.name; });
 
-dbs.forEach(function(database) {
+if (dbNames.indexOf('inventory') !== -1) {
+  print('-----------------------------------------');
+  print('Processing database: inventory');
+  print('-----------------------------------------');
+  var inventoryDb = db.getSiblingDB('inventory');
+  inventoryDb.getCollectionNames().forEach(function(collectionName) {
+    print('Collection: ' + collectionName);
+    inventoryDb[collectionName].find().forEach(function(doc) { printjson(doc); });
+  });
+}
+
+allDbs.forEach(function(database) {
   if (database.name.startsWith('inventory-')) {
     print('-----------------------------------------');
     print('Processing database: ' + database.name);
     print('-----------------------------------------');
-
     var currentDb = db.getSiblingDB(database.name);
-    var collections = currentDb.getCollectionNames();
-
-    collections.forEach(function(collectionName) {
+    currentDb.getCollectionNames().forEach(function(collectionName) {
       print('Collection: ' + collectionName);
-      currentDb[collectionName].find().forEach(function(doc) {
-        printjson(doc);
-      });
+      currentDb[collectionName].find().forEach(function(doc) { printjson(doc); });
     });
   }
 });
